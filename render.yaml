@@ -1,0 +1,62 @@
+# Render.com Blueprint for the Bike Troubleshooting Bot backend.
+#
+# Render is the free-tier-friendly host for the FastAPI server.
+# It supports persistent disks (so ChromaDB and SQLite survive restarts)
+# and long-running Python processes (which Netlify cannot offer).
+#
+# To deploy:
+#   1. Push this repo to GitHub.
+#   2. In Render → New → Blueprint, point at this repo.
+#   3. Render reads this file, creates the service.
+#   4. After it's live, set the secrets in the Render dashboard:
+#        SARVAM_API_KEY
+#        GEMINI_API_KEY
+#        WHAPI_TOKEN  (optional)
+#   5. Note the public URL (e.g. https://bike-bot-backend.onrender.com).
+#   6. Paste that URL into netlify.toml (both [[redirects]] blocks).
+
+services:
+  - type: web
+    name: bike-bot-backend
+    runtime: python
+    region: singapore             # Closest to Indian users.
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeploy: true
+
+    # Persistent disk so ChromaDB + SQLite survive deploys/restarts.
+    disk:
+      name: bike-bot-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
+
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: SARVAM_MODEL
+        value: sarvam-105b
+      - key: SARVAM_BASE_URL
+        value: https://api.sarvam.ai
+      - key: GEMINI_VISION_MODEL
+        value: gemini-2.5-flash
+      - key: GEMINI_EMBED_MODEL
+        value: gemini-embedding-001
+      - key: GEMINI_REWRITER_MODEL
+        value: gemini-2.5-flash
+      - key: WHAPI_BASE_URL
+        value: https://gate.whapi.cloud
+      - key: MANUALS_DIR
+        value: data/manuals
+      - key: CHROMA_DIR
+        value: data/chroma_db
+      - key: BM25_INDEX_PATH
+        value: data/bm25_index.pkl
+      # Secret values — set in the Render dashboard, not committed:
+      - key: SARVAM_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: WHAPI_TOKEN
+        sync: false

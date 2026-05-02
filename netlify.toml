@@ -1,0 +1,45 @@
+# Netlify config for the Bike Troubleshooting Bot frontend.
+#
+# Netlify hosts the static frontend (HTML/CSS/JS in /frontend).
+# All /api/* requests are proxied to the Python backend hosted on Render.
+# The browser only ever talks to your Netlify URL — no CORS surprises.
+#
+# Before deploying:
+#   1. Deploy the backend on Render first (see render.yaml).
+#   2. Set BACKEND_URL in Netlify env vars (Site settings → Build & deploy → Environment).
+#      Example value: https://bike-bot-backend.onrender.com
+#   3. Update the redirect "to =" line below with the same URL — Netlify
+#      doesn't substitute env vars inside [[redirects]] blocks.
+
+[build]
+  publish = "frontend"
+  # No build step needed — the frontend is plain HTML/CSS/JS.
+  command = "echo 'Static site — nothing to build.'"
+
+# Proxy backend API calls so the frontend can keep using relative /api/* URLs.
+# REPLACE the URL below with your Render backend URL after deployment.
+[[redirects]]
+  from = "/api/*"
+  to = "https://YOUR-BACKEND.onrender.com/api/:splat"
+  status = 200
+  force = true
+
+# Optional: also proxy WhatsApp webhook if you ever switch to Netlify-only domain.
+[[redirects]]
+  from = "/whatsapp/*"
+  to = "https://YOUR-BACKEND.onrender.com/whatsapp/:splat"
+  status = 200
+  force = true
+
+# Single-page-app fallback — every other path serves index.html.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"

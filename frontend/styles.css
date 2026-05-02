@@ -1,0 +1,272 @@
+:root {
+  --bg: #f6f7fb;
+  --surface: #ffffff;
+  --border: #e3e5ec;
+  --text: #1c1f26;
+  --muted: #6b7280;
+  --accent: #5b3df5;
+  --accent-soft: #ece8ff;
+  --success: #16a34a;
+  --warn: #d97706;
+  --whatsapp: #25d366;
+  --whatsapp-bg: #e5ddd5;
+  --bubble-user: #dcf8c6;
+  --bubble-bot: #ffffff;
+  --shadow: 0 4px 14px rgba(0,0,0,0.06);
+  --radius: 14px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ============================ Top bar ================================ */
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 28px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.brand { display: flex; align-items: center; gap: 14px; }
+.logo {
+  font-size: 32px;
+  width: 52px; height: 52px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-soft);
+  border-radius: 14px;
+}
+.brand h1 { margin: 0; font-size: 20px; font-weight: 700; }
+.muted { color: var(--muted); margin: 2px 0 0; font-size: 13px; }
+
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.tab {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tab:hover { border-color: var(--accent); }
+.tab.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+/* ============================ Layout ================================== */
+main { padding: 24px 28px; max-width: 1200px; margin: 0 auto; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 18px;
+  box-shadow: var(--shadow);
+}
+.card h2 { margin: 0 0 12px; font-size: 17px; }
+
+/* ============================ Chat tab ================================ */
+#tab-chat.active { display: grid; grid-template-columns: 260px 1fr; gap: 18px; }
+.sidebar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  box-shadow: var(--shadow);
+  height: fit-content;
+}
+.sidebar h3 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.sidebar select {
+  width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+  background: white; font-size: 14px; margin-bottom: 8px;
+}
+.tips { padding-left: 18px; font-size: 13px; color: var(--muted); line-height: 1.6; }
+.link { background: none; border: none; color: var(--accent); cursor: pointer; padding: 0; font-size: 12px; }
+
+.chat-pane {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex; flex-direction: column;
+  height: calc(100vh - 200px);
+  min-height: 480px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.chat-log { flex: 1; padding: 22px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+
+.msg { display: flex; }
+.msg.user { justify-content: flex-end; }
+.msg.bot  { justify-content: flex-start; }
+
+.bubble {
+  max-width: 75%;
+  padding: 12px 16px;
+  border-radius: 16px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.msg.user .bubble { background: var(--accent); color: white; border-bottom-right-radius: 4px; }
+.msg.bot  .bubble { background: var(--accent-soft); color: var(--text); border-bottom-left-radius: 4px; }
+
+.bubble img { max-width: 220px; max-height: 220px; border-radius: 8px; display: block; margin-bottom: 8px; }
+.citations { font-size: 12px; color: var(--muted); margin-top: 8px; }
+.confidence-pill {
+  display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  margin-right: 6px; text-transform: uppercase; font-weight: 600;
+}
+.conf-high  { background: #d1fae5; color: #065f46; }
+.conf-medium { background: #fef3c7; color: #92400e; }
+.conf-low   { background: #fee2e2; color: #991b1b; }
+.unsupported { color: var(--warn); font-weight: 600; }
+
+.composer {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 16px; border-top: 1px solid var(--border); background: #fafbff;
+}
+.composer input[type=text] {
+  flex: 1; border: 1px solid var(--border); border-radius: 999px;
+  padding: 11px 18px; font-size: 14px; outline: none;
+}
+.composer input[type=text]:focus { border-color: var(--accent); }
+.icon-btn {
+  cursor: pointer; padding: 8px 10px; border-radius: 50%; background: var(--bg);
+  border: 1px solid var(--border); font-size: 16px;
+}
+.icon-btn:hover { background: var(--accent-soft); }
+
+.primary {
+  background: var(--accent); color: white; border: none;
+  padding: 10px 22px; border-radius: 999px; font-weight: 600; cursor: pointer;
+}
+.primary:hover { filter: brightness(1.05); }
+
+.image-pill {
+  font-size: 12px; padding: 6px 10px; background: var(--accent-soft);
+  border-radius: 999px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hidden { display: none; }
+
+/* ============================ Manuals tab ============================== */
+.ingest { display: grid; gap: 12px; max-width: 480px; }
+.ingest label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.ingest input[type=text], .ingest input[type=file] {
+  padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px;
+}
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 14px; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+/* ============================ Health tab ============================== */
+#health-list { list-style: none; padding: 0; }
+#health-list li {
+  padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between;
+}
+.dot-ok { color: var(--success); font-weight: 700; }
+.dot-no { color: var(--warn); font-weight: 700; }
+
+/* ============================ WhatsApp tab ============================ */
+.whatsapp-frame {
+  max-width: 440px; margin: 0 auto;
+  border: 1px solid var(--border); border-radius: 18px; overflow: hidden;
+  background: var(--whatsapp-bg);
+  box-shadow: var(--shadow);
+}
+.wa-header {
+  background: #075e54; color: white;
+  padding: 14px 16px; display: flex; align-items: center; gap: 12px;
+}
+.wa-avatar {
+  width: 40px; height: 40px; border-radius: 50%;
+  background: white; display: flex; align-items: center; justify-content: center; font-size: 22px;
+}
+.wa-name { font-weight: 700; font-size: 15px; }
+.wa-status { font-size: 11px; opacity: 0.85; }
+
+.wa-log {
+  padding: 16px; min-height: 380px; max-height: 480px;
+  overflow-y: auto; display: flex; flex-direction: column; gap: 8px;
+  background-image:
+    radial-gradient(rgba(255,255,255,0.4) 1px, transparent 1px),
+    radial-gradient(rgba(0,0,0,0.05) 1px, transparent 1px);
+  background-size: 14px 14px, 28px 28px;
+}
+.wa-msg {
+  max-width: 80%; padding: 8px 12px; border-radius: 8px;
+  font-size: 14px; line-height: 1.4; box-shadow: 0 1px 0 rgba(0,0,0,0.08);
+  position: relative;
+}
+.wa-msg.user { align-self: flex-end; background: var(--bubble-user); border-bottom-right-radius: 0; }
+.wa-msg.bot  { align-self: flex-start; background: var(--bubble-bot); border-bottom-left-radius: 0; }
+.wa-msg img { max-width: 200px; border-radius: 6px; display: block; margin-bottom: 6px; }
+.wa-time { font-size: 10px; color: var(--muted); margin-top: 4px; text-align: right; }
+
+.wa-composer {
+  display: flex; gap: 6px; padding: 10px; background: #f0f0f0;
+  align-items: center; border-top: 1px solid var(--border); flex-wrap: wrap;
+}
+.wa-composer input[type=tel] {
+  flex: 0 0 130px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 13px;
+}
+.wa-composer input[type=text] {
+  flex: 1; padding: 9px 14px; border: 1px solid var(--border); border-radius: 999px; font-size: 14px;
+}
+.hint { font-size: 12px; color: var(--muted); padding: 8px 14px 14px; }
+
+/* ============================ Dashboard tab ============================ */
+.dash-controls {
+  display: flex; gap: 12px; align-items: end; margin-bottom: 16px;
+}
+.dash-controls label {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px; color: var(--muted);
+}
+.dash-controls select {
+  padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: white; font-size: 14px;
+}
+.kpi-row {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px; margin-bottom: 18px;
+}
+.kpi {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px; box-shadow: var(--shadow);
+}
+.kpi-label {
+  font-size: 11px; text-transform: uppercase; color: var(--muted);
+  letter-spacing: 0.06em; font-weight: 600;
+}
+.kpi-val {
+  font-size: 26px; font-weight: 700; color: var(--accent); margin-top: 4px;
+}
+.kpi-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+.dash-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 14px; margin-bottom: 18px;
+}
+@media (max-width: 880px) { .dash-grid { grid-template-columns: 1fr; } }
+
+#recent-table th, #recent-table td {
+  font-size: 12px; padding: 8px 10px;
+}
+#recent-table td { font-family: ui-monospace, SFMono-Regular, monospace; }
+#recent-table .q-cell { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#recent-table .conf-pill { padding: 2px 8px; border-radius: 999px; font-weight: 600; font-size: 11px; }
+

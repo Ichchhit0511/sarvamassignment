@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<!-- Override the backend URL from the host (Netlify env, Render, etc).
+     Default is empty → use relative /api paths (works when frontend and
+     backend are served from the same origin, e.g. local dev or Netlify proxy). -->
+<meta name="backend-url" content="" />
+<title>Bike Troubleshooting Bot</title>
+<link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">🏍️</div>
+    <div>
+      <h1>Bike Troubleshooting Bot</h1>
+      <p class="muted">Multilingual · grounded in your owner's manual · powered by Sarvam 105B</p>
+    </div>
+  </div>
+  <div class="tabs">
+    <button class="tab active" data-tab="chat">💬 Chat</button>
+    <button class="tab" data-tab="manuals">📚 Manuals</button>
+    <button class="tab" data-tab="dashboard">📊 Dashboard</button>
+    <button class="tab" data-tab="health">⚙️ Status</button>
+  </div>
+</header>
+
+<main>
+  <!-- =================================================================== -->
+  <!-- CHAT TAB                                                             -->
+  <!-- =================================================================== -->
+  <section id="tab-chat" class="tab-panel active">
+    <aside class="sidebar">
+      <h3>Manual</h3>
+      <select id="manual-select"></select>
+      <button id="refresh-manuals" class="link">Refresh</button>
+
+      <h3>Memory</h3>
+      <p class="muted" style="font-size:11px;">Multi-turn conversation. Follow-ups like "and how do I fix it?" work.</p>
+      <button id="clear-memory" class="link">🧠 Clear this chat's memory</button>
+
+      <h3>Tips</h3>
+      <ul class="tips">
+        <li>Ask in any language — Hindi, Tamil, Marathi, English…</li>
+        <li>Attach a photo if the issue is visible (smoke, leak, damage)</li>
+        <li>Answers are <b>only</b> from the manual</li>
+      </ul>
+    </aside>
+
+    <div class="chat-pane">
+      <div id="chat-log" class="chat-log">
+        <div class="msg bot">
+          <div class="bubble">
+            Hi! I'm your bike assistant. Ask me about any issue with your bike — in any language —
+            and I'll answer using your owner's manual. You can attach a photo if it helps.
+          </div>
+        </div>
+      </div>
+
+      <form id="chat-form" class="composer">
+        <label for="image-input" class="icon-btn" title="Attach photo">📎</label>
+        <input id="image-input" type="file" accept="image/*" hidden />
+        <span id="image-pill" class="image-pill hidden"></span>
+
+        <input id="query-input" type="text" placeholder="e.g. इंजन से सफेद धुआँ क्यों आ रहा है?" autocomplete="off" />
+        <button type="submit" class="primary">Send</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- =================================================================== -->
+  <!-- MANUALS TAB                                                          -->
+  <!-- =================================================================== -->
+  <section id="tab-manuals" class="tab-panel">
+    <div class="card">
+      <h2>Upload a manual</h2>
+      <form id="ingest-form" class="ingest">
+        <label>Manual ID
+          <input id="manual-id" type="text" placeholder="e.g. royal_enfield_classic_350" required />
+        </label>
+        <label>PDF file
+          <input id="manual-file" type="file" accept="application/pdf" required />
+        </label>
+        <button class="primary">Ingest</button>
+      </form>
+      <p id="ingest-status" class="muted"></p>
+    </div>
+
+    <div class="card">
+      <h2>Indexed manuals</h2>
+      <table id="manuals-table">
+        <thead><tr><th>Manual ID</th><th>Chunks</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- =================================================================== -->
+  <!-- DASHBOARD TAB                                                        -->
+  <!-- =================================================================== -->
+  <section id="tab-dashboard" class="tab-panel">
+    <div class="dash-controls">
+      <label>Window
+        <select id="dash-window">
+          <option value="1">last 1 h</option>
+          <option value="24" selected>last 24 h</option>
+          <option value="168">last 7 days</option>
+          <option value="720">last 30 days</option>
+        </select>
+      </label>
+      <button id="dash-refresh" class="primary">Refresh</button>
+    </div>
+
+    <div class="kpi-row">
+      <div class="kpi"><div class="kpi-label">Queries</div><div class="kpi-val" id="kpi-total">—</div></div>
+      <div class="kpi"><div class="kpi-label">Manual-supported</div><div class="kpi-val" id="kpi-supported">—</div><div class="kpi-sub">% answered confidently from manual</div></div>
+      <div class="kpi"><div class="kpi-label">Citation kept rate</div><div class="kpi-val" id="kpi-cites">—</div><div class="kpi-sub">verifier accept rate</div></div>
+      <div class="kpi"><div class="kpi-label">Avg top-1 score</div><div class="kpi-val" id="kpi-score">—</div><div class="kpi-sub">retrieval precision proxy</div></div>
+      <div class="kpi"><div class="kpi-label">Avg latency</div><div class="kpi-val" id="kpi-latency">—</div></div>
+    </div>
+
+    <div class="dash-grid">
+      <div class="card">
+        <h2>Stage latency (ms, average)</h2>
+        <canvas id="chart-latency" height="180"></canvas>
+      </div>
+      <div class="card">
+        <h2>Token usage per query (avg)</h2>
+        <canvas id="chart-tokens" height="180"></canvas>
+        <p class="muted" id="token-cost-hint"></p>
+      </div>
+      <div class="card">
+        <h2>Confidence distribution</h2>
+        <canvas id="chart-confidence" height="180"></canvas>
+      </div>
+      <div class="card">
+        <h2>Languages</h2>
+        <canvas id="chart-languages" height="180"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Recent queries</h2>
+      <table id="recent-table">
+        <thead><tr>
+          <th>Time</th><th>Query</th><th>Lang</th><th>Img</th>
+          <th>Conf</th><th>Top score</th><th>Cites</th>
+          <th>Sarvam in/out</th><th>Gemini in/out</th><th>Total ms</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- =================================================================== -->
+  <!-- HEALTH TAB                                                           -->
+  <!-- =================================================================== -->
+  <section id="tab-health" class="tab-panel">
+    <div class="card">
+      <h2>API key status</h2>
+      <p class="muted">Edit <code>api.env</code> in the project root, then restart the server.</p>
+      <ul id="health-list"></ul>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
