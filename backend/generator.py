@@ -53,9 +53,11 @@ Follow these rules exactly:
 
 4. If the user asks for something that is not clearly covered by the retrieved
    manual chunks, reply briefly in the user's language. Do not invent an answer.
-   Either ask for the specific symptom if the user was vague, or say the manual
-   does not clearly cover it and suggest contacting an authorized service
-   center. Use:
+   If the user is describing a bike issue but the symptom is broad, vague,
+   incomplete, or not clearly covered by the manual chunks, ask ONE short and
+   neutral follow-up question to understand the issue better. Do not suggest
+   checks, causes, examples, or technical possibilities that are not explicitly
+   supported by the manual chunks. Use:
    - "manual_supported": false
    - "citations": []
 
@@ -87,6 +89,12 @@ ROMAN_HINDI_HINTS = {
     "kyun", "kyu", "nahi", "nahin", "karu", "karo", "karna", "bataye",
     "batao", "chahiye", "start", "band", "chal", "chalti", "awaaz",
     "dhua", "smoke", "light", "service", "issue", "me", "mein",
+}
+
+ISSUE_KEYWORDS = {
+    "problem", "issue", "dikkat", "takleef", "accident", "crash", "damage",
+    "repair", "fix", "stuck", "band", "start", "chal", "awaaz", "noise",
+    "smoke", "leak", "light", "warning", "brake", "battery", "engine",
 }
 
 
@@ -150,6 +158,89 @@ def _looks_like_romanized_hindi(text: str) -> bool:
         return False
     hits = sum(1 for w in words if w in ROMAN_HINDI_HINTS)
     return hits >= 2
+
+
+def _query_words(text: str) -> set[str]:
+    cleaned = re.sub(r"[^a-zA-Z\s]", " ", text or "").lower()
+    return {w for w in cleaned.split() if w}
+
+
+def _is_issue_query(query: str) -> bool:
+    words = _query_words(query)
+    if words & ISSUE_KEYWORDS:
+        return True
+    return any(token in (query or "") for token in (
+        "समस्या", "दिक्कत", "एक्सीडेंट", "चल", "स्टार्ट", "आवाज़", "धुआँ",
+        "લીક", "સમસ્યા", "અકસ્મત", "விபத்து", "பிரச்சனை",
+    ))
+
+
+def _followup_kind(query: str) -> str:
+    q = (query or "").lower()
+    if any(k in q for k in ("accident", "crash", "takkar", "gir", "damage")) or any(
+        k in (query or "") for k in ("एक्सीडेंट", "टक्कर", "गिर", "અકસ્મત", "ટક્કર", "விபத்து")
+    ):
+        return "accident"
+    if any(k in q for k in ("start", "starting", "not start", "chal nai", "chal nahi", "band", "won't run", "not running")) or any(
+        k in (query or "") for k in ("स्टार्ट", "चल नहीं", "बंद", "ચાલ", "સ્ટાર્ટ", "ஓடவில்லை", "ஸ்டார்ட்")
+    ):
+        return "not_running"
+    if any(k in q for k in ("noise", "sound", "awaaz")) or any(
+        k in (query or "") for k in ("आवाज़", "शोर", "અવાજ", "சத்தம்")
+    ):
+        return "noise"
+    if any(k in q for k in ("smoke", "dhua")) or any(
+        k in (query or "") for k in ("धुआँ", "धुआ", "ધુમાડો", "புகை")
+    ):
+        return "smoke"
+    if any(k in q for k in ("leak", "oil leak", "fluid")) or any(
+        k in (query or "") for k in ("लीक", "तेल", "લીક", "எண்ணெய்")
+    ):
+        return "leak"
+    return "generic_issue"
+
+
+def _followup_question(query: str, language: str) -> str:
+    if language == "hi-Latn":
+        return "Ji, kripya issue ko thoda detail mein batayein taaki main use theek se samajh sakun."
+
+    if language == "hi":
+        return "जी, कृपया समस्या को थोड़ा विस्तार से बताइए ताकि मैं उसे ठीक से समझ सकूं।"
+
+    if language == "gu":
+        return "કૃપા કરીને સમસ્યાને થોડું વિગતે વર્ણવો જેથી હું તેને સારી રીતે સમજી શકું."
+
+    if language == "ta":
+        return "தயவுசெய்து பிரச்சனையை கொஞ்சம் விரிவாக விளக்குங்கள், அப்போதுதான் நான் அதை நன்றாக புரிந்துகொள்ள முடியும்."
+
+    return "Please describe the issue in a bit more detail so I can understand it properly."
+
+
+def should_ask_followup(query: str) -> bool:
+    q = (query or "").lower()
+    words = _query_words(query)
+    if not _is_issue_query(query):
+        return False
+
+    if _followup_kind(query) == "accident":
+        return True
+
+    if any(k in q for k in ("chal nai", "chal nahi", "not running", "sahi nahi", "kaam nahi")):
+        return True
+
+    generic_terms = {"problem", "issue", "dikkat", "takleef", "repair", "fix"}
+    specific_terms = {
+        "start", "battery", "brake", "tyre", "tire", "chain", "clutch", "gear",
+        "engine", "fuel", "smoke", "noise", "awaaz", "leak", "warning", "light",
+    }
+    has_generic = bool(words & generic_terms) or any(
+        token in (query or "") for token in ("समस्या", "दिक्कत", "પ્રશ્ન", "સમસ્યા", "பிரச்சனை")
+    )
+    has_specific = bool(words & specific_terms) or _followup_kind(query) != "generic_issue"
+    if has_generic and not has_specific:
+        return True
+
+    return False
 
 
 def _answer_matches_language(answer_text: str, returned_language: str | None,
@@ -356,38 +447,43 @@ def _fallback_answer(query: str, language: str) -> GroundedAnswer:
     q = (query or "").strip().lower()
     greeting_words = {"hi", "hello", "hey", "good morning", "good afternoon", "good evening", "namaste", "namaskar", "thanks", "thank you"}
     is_greeting = q in greeting_words
-    vague_problem = (
-        "problem" in q or "issue" in q or "dikkat" in q or "takleef" in q or "समस्या" in query
-    ) and len(q.split()) <= 8
+    vague_problem = should_ask_followup(query)
 
     if language == "hi-Latn":
         if is_greeting:
             text = "Namaste, main Royal Enfield bike assistant hoon. Aap apni bike ki problem ya specifications ke baare mein pooch sakte hain."
         elif vague_problem:
-            text = "Ji, bike mein kya exact issue aa raha hai? Kripya symptom thoda detail mein batayein."
+            text = _followup_question(query, language)
         else:
-            text = "Mujhe is baare mein manual se clear jaankari nahi mili. Kripya exact symptom batayein, ya authorized service center se sampark karein."
+            text = _followup_question(query, language)
     elif language == "hi":
         if is_greeting:
             text = "नमस्ते, मैं Royal Enfield bike assistant हूं। आप अपनी बाइक की समस्या या specifications के बारे में पूछ सकते हैं।"
         elif vague_problem:
-            text = "जी, बाइक में ठीक कौन सी समस्या आ रही है? कृपया लक्षण थोड़ा विस्तार से बताइए।"
+            text = _followup_question(query, language)
         else:
-            text = "मुझे इस बारे में मैनुअल से स्पष्ट जानकारी नहीं मिली। कृपया सही लक्षण बताइए, या अधिकृत सर्विस सेंटर से संपर्क करें।"
+            text = _followup_question(query, language)
+    elif language == "gu":
+        if is_greeting:
+            text = "નમસ્તે, હું Royal Enfield bike assistant છું. તમે તમારી બાઈકની સમસ્યા અથવા specifications વિશે પૂછો શકો છો."
+        elif vague_problem:
+            text = _followup_question(query, language)
+        else:
+            text = _followup_question(query, language)
     elif language == "ta":
         if is_greeting:
             text = "வணக்கம், நான் Royal Enfield bike assistant. உங்கள் பைக் பிரச்சனை அல்லது specifications பற்றி கேட்கலாம்."
         elif vague_problem:
-            text = "சரி, பைக்கில் என்ன சரியான பிரச்சனை வருகிறது? அறிகுறியை கொஞ்சம் விளக்கமாக சொல்லுங்கள்."
+            text = _followup_question(query, language)
         else:
-            text = "இந்த விஷயத்திற்கு கையேட்டில் தெளிவான தகவல் கிடைக்கவில்லை. சரியான அறிகுறியை சொல்லுங்கள், அல்லது அதிகாரப்பூர்வ சேவை மையத்தை தொடர்புகொள்ளுங்கள்."
+            text = _followup_question(query, language)
     else:
         if is_greeting:
             text = "Hi, I am the Royal Enfield bike assistant. You can ask me about your bike issue or key specifications."
         elif vague_problem:
-            text = "Sure, what exact issue are you facing with the bike? Please describe the symptom a bit more."
+            text = _followup_question(query, language)
         else:
-            text = "I could not find clear guidance for this in the manual. Please share the exact symptom, or contact an authorized service center."
+            text = _followup_question(query, language)
     return GroundedAnswer(
         answer=text,
         citations=[],
@@ -464,8 +560,13 @@ def _rewrite_answer_in_target_language(answer_text: str,
     return answer_text
 
 
-def _refusal(reason: str, language: str = "en") -> GroundedAnswer:
-    return _fallback_answer("unsupported", language)
+def _refusal(reason: str, language: str = "en", query: str = "") -> GroundedAnswer:
+    return _fallback_answer(query or "unsupported", language)
+
+
+def build_nonmanual_reply(query: str) -> GroundedAnswer:
+    language, _ = _detect_query_language(query)
+    return _fallback_answer(query, language)
 
 
 def _generate_with_sarvam(query: str,
@@ -567,7 +668,7 @@ def generate(query: str, vision: VisionObservation | None,
     target_language_code, target_language_name = _detect_query_language(query)
 
     if not chunks:
-        return _refusal("No manual chunks retrieved.", language=target_language_code), usage
+        return _refusal("No manual chunks retrieved.", language=target_language_code, query=query), usage
 
     try:
         if answer_model == "gemini":

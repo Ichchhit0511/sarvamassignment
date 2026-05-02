@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import memory, metrics, whatsapp
 from .config import PROJECT_ROOT, settings
-from .generator import generate, sanitize_answer_text
+from .generator import build_nonmanual_reply, generate, sanitize_answer_text, should_ask_followup
 from .ingest import ingest_pdf
 from .models import (
     GroundedAnswer,
@@ -387,6 +387,8 @@ def _run_pipeline(query: str, image_b64: Optional[str],
     t0 = time.time()
     answer = verify(raw_answer, retrieved)
     answer.answer = sanitize_answer_text(answer.answer)
+    if should_ask_followup(query):
+        answer = build_nonmanual_reply(query)
     if (
         answer.manual_supported
         and _is_generic_image_diagnosis_query(query, image_b64)
