@@ -1,3 +1,12 @@
+---
+title: Bike Troubleshooting Bot
+emoji: "🏍️"
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+---
+
 # Bike Troubleshooting Bot
 
 Multimodal RAG bot that answers bike issues **only** from the user's manual,
