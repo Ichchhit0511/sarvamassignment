@@ -46,6 +46,31 @@ Output schema:
 """
 
 
+def _detect_query_language(query: str) -> tuple[str, str]:
+    """Lightweight language detection based on script, with English fallback."""
+    for ch in query:
+        cp = ord(ch)
+        if 0x0900 <= cp <= 0x097F:
+            return "hi", "Hindi"
+        if 0x0B80 <= cp <= 0x0BFF:
+            return "ta", "Tamil"
+        if 0x0980 <= cp <= 0x09FF:
+            return "bn", "Bengali"
+        if 0x0C00 <= cp <= 0x0C7F:
+            return "te", "Telugu"
+        if 0x0C80 <= cp <= 0x0CFF:
+            return "kn", "Kannada"
+        if 0x0A80 <= cp <= 0x0AFF:
+            return "gu", "Gujarati"
+        if 0x0A00 <= cp <= 0x0A7F:
+            return "pa", "Punjabi"
+        if 0x0D00 <= cp <= 0x0D7F:
+            return "ml", "Malayalam"
+        if 0x0B00 <= cp <= 0x0B7F:
+            return "or", "Odia"
+    return "en", "English"
+
+
 def _format_chunks(chunks: list[RetrievedChunk]) -> str:
     lines: list[str] = []
     for rc in chunks:
@@ -58,7 +83,9 @@ def _format_chunks(chunks: list[RetrievedChunk]) -> str:
 
 
 def _build_user_message(query: str, vision: VisionObservation | None,
-                        chunks: list[RetrievedChunk]) -> str:
+                        chunks: list[RetrievedChunk],
+                        target_language_code: str,
+                        target_language_name: str) -> str:
     vision_block = ""
     if vision:
         vision_block = (
@@ -67,6 +94,10 @@ def _build_user_message(query: str, vision: VisionObservation | None,
         )
 
     return (
+        f"CURRENT USER QUESTION LANGUAGE: {target_language_name} ({target_language_code})\n"
+        "IMPORTANT: Answer in the language of the CURRENT USER QUESTION only. "
+        "Do not continue the language from earlier chat history unless the current "
+        "question is in that same language.\n\n"
         f"USER QUESTION: {query}\n"
         f"{vision_block}\n"
         f"MANUAL CHUNKS (your only knowledge source):\n"
@@ -115,9 +146,10 @@ def generate(query: str, vision: VisionObservation | None,
         (GroundedAnswer, usage)  where usage = {input_tokens, output_tokens}
     """
     usage = {"input_tokens": 0, "output_tokens": 0}
+    target_language_code, target_language_name = _detect_query_language(query)
 
     if not chunks:
-        return _refusal("No manual chunks retrieved."), usage
+        return _refusal("No manual chunks retrieved.", language=target_language_code), usage
 
     if not settings.sarvam_api_key:
         return GroundedAnswer(
@@ -129,7 +161,7 @@ def generate(query: str, vision: VisionObservation | None,
             citations=[Citation(page=chunks[0].chunk.page, chunk_id=chunks[0].chunk.chunk_id)],
             confidence="low",
             manual_supported=False,
-            language="en",
+            language=target_language_code,
         ), usage
 
     messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -137,7 +169,13 @@ def generate(query: str, vision: VisionObservation | None,
         messages.extend(history)
     messages.append({
         "role": "user",
-        "content": _build_user_message(query, vision, chunks),
+        "content": _build_user_message(
+            query,
+            vision,
+            chunks,
+            target_language_code,
+            target_language_name,
+        ),
     })
 
     try:
@@ -156,7 +194,7 @@ def generate(query: str, vision: VisionObservation | None,
             citations=[],
             confidence="low",
             manual_supported=False,
-            language="en",
+            language=target_language_code,
         ), usage
 
     # Token usage — the SDK response mirrors OpenAI's shape but field access varies.
@@ -185,5 +223,5 @@ def generate(query: str, vision: VisionObservation | None,
         citations=citations,
         confidence=parsed.get("confidence", "low"),
         manual_supported=bool(parsed.get("manual_supported", False)),
-        language=parsed.get("language"),
+        language=parsed.get("language") or target_language_code,
     ), usage
