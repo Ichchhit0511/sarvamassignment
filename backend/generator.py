@@ -28,6 +28,8 @@ source is the manual chunks the user provides. Follow these rules absolutely:
    should consult an authorized service center.
 3. Every factual claim in your answer must be traceable to one of the chunks.
    Cite chunks via the "citations" field with the page number and chunk_id.
+   Never mention chunk IDs, internal IDs, or raw citation objects in the
+   user-facing "answer" text.
 4. Detect the language of the user's question (Hindi, Tamil, Marathi, Bengali,
    Telugu, Kannada, English, etc.) and write the "answer" field in THAT SAME
    language. Use the script of that language (Devanagari for Hindi, etc.).
@@ -122,6 +124,17 @@ def _parse_json(text: str) -> dict:
             except Exception:
                 pass
     return {}
+
+
+def sanitize_answer_text(text: str) -> str:
+    """Remove internal citation identifiers from user-facing answer text."""
+    cleaned = (text or "").strip()
+    cleaned = re.sub(r"\bchunk_id\s*[:=]\s*[A-Za-z0-9_-]+\b", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"\b[A-Fa-f0-9]{16,}\b", "", cleaned)
+    cleaned = re.sub(r"\(\s*,?\s*\)", "", cleaned)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
 
 
 def _refusal(reason: str, language: str = "en") -> GroundedAnswer:
@@ -219,7 +232,7 @@ def generate(query: str, vision: VisionObservation | None,
         if isinstance(c, dict)
     ]
     return GroundedAnswer(
-        answer=parsed.get("answer") or raw or "",
+        answer=sanitize_answer_text(parsed.get("answer") or raw or ""),
         citations=citations,
         confidence=parsed.get("confidence", "low"),
         manual_supported=bool(parsed.get("manual_supported", False)),

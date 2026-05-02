@@ -13,6 +13,7 @@ Endpoints:
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import time
 from typing import Optional
@@ -24,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import memory, metrics, whatsapp
 from .config import PROJECT_ROOT, settings
-from .generator import generate
+from .generator import generate, sanitize_answer_text
 from .ingest import ingest_pdf
 from .models import (
     GroundedAnswer,
@@ -103,11 +104,99 @@ def _ms_since(t0: float) -> int:
     return int((time.time() - t0) * 1000)
 
 
+def _detect_query_language(query: str) -> str:
+    for ch in query:
+        cp = ord(ch)
+        if 0x0900 <= cp <= 0x097F:
+            return "hi"
+        if 0x0B80 <= cp <= 0x0BFF:
+            return "ta"
+    return "en"
+
+
+def _is_greeting_or_general_chat(query: str, image_b64: Optional[str]) -> bool:
+    if image_b64:
+        return False
+    q = (query or "").strip().lower()
+    if not q:
+        return False
+    q = re.sub(r"[^\w\s]", " ", q)
+    q = re.sub(r"\s+", " ", q).strip()
+    general_patterns = [
+        r"^(hi|hello|hey|hii|good morning|good afternoon|good evening)$",
+        r"^(who are you|what can you do|help|start)$",
+        r"^(thanks|thank you|ok|okay)$",
+    ]
+    return any(re.match(pattern, q) for pattern in general_patterns)
+
+
+def _general_chat_answer(query: str) -> GroundedAnswer:
+    lang = _detect_query_language(query)
+    if lang == "hi":
+        text = (
+            "नमस्ते। मैं रॉयल एनफील्ड बाइक असिस्टेंट हूं। आप अपनी बाइक में आ रही किसी भी "
+            "समस्या के बारे में पूछ सकते हैं, या बाइक की मुख्य तकनीकी specifications जान सकते हैं."
+        )
+    elif lang == "ta":
+        text = (
+            "வணக்கம். நான் ராயல் என்ஃபீல்ட் பைக் உதவியாளர். உங்கள் பைக்கில் இருக்கும் "
+            "எந்த பிரச்சனையையும் கேட்கலாம், அல்லது பைக்கின் முக்கிய தொழில்நுட்ப விவரங்களையும் கேட்கலாம்."
+        )
+    else:
+        text = (
+            "Hi, I am the Royal Enfield bike assistant. You can ask me about any "
+            "issue you are facing with the bike, or about key technical specifications of the bike."
+        )
+    return GroundedAnswer(
+        answer=text,
+        citations=[],
+        confidence="high",
+        manual_supported=True,
+        language=lang,
+    )
+
+
 def _run_pipeline(query: str, image_b64: Optional[str],
                   manual_id: Optional[str],
                   session_id: Optional[str] = None) -> QueryResponse:
     overall_t0 = time.time()
     error_str: Optional[str] = None
+
+    if _is_greeting_or_general_chat(query, image_b64):
+        answer = _general_chat_answer(query)
+        total_ms = _ms_since(overall_t0)
+        metrics.record(
+            session_id=session_id,
+            manual_id=manual_id,
+            query=query[:500],
+            language=answer.language,
+            has_image=0,
+            num_rewrites=0,
+            num_retrieved=0,
+            top_retrieval_score=0.0,
+            manual_supported=1,
+            confidence=answer.confidence,
+            num_citations_raw=0,
+            num_citations_kept=0,
+            sarvam_input_tokens=0,
+            sarvam_output_tokens=0,
+            gemini_input_tokens=0,
+            gemini_output_tokens=0,
+            vision_ms=0,
+            rewrite_ms=0,
+            retrieve_ms=0,
+            generate_ms=0,
+            verify_ms=0,
+            total_ms=total_ms,
+            error=error_str,
+        )
+        return QueryResponse(
+            answer=answer,
+            vision=None,
+            rewrites=[],
+            retrieved=[],
+            metrics=QueryMetrics(total_ms=total_ms),
+        )
 
     # Stage 1: Vision
     t0 = time.time()
@@ -145,6 +234,7 @@ def _run_pipeline(query: str, image_b64: Optional[str],
     # Stage 5: Verify
     t0 = time.time()
     answer = verify(raw_answer, retrieved)
+    answer.answer = sanitize_answer_text(answer.answer)
     verify_ms = _ms_since(t0)
 
     total_ms = _ms_since(overall_t0)
