@@ -56,6 +56,23 @@ def _init() -> None:
 _init()
 
 
+def _normalize_history(rows: list[sqlite3.Row]) -> list[dict]:
+    """Keep only well-formed alternating user/assistant turns starting with user."""
+    normalized: list[dict] = []
+    expected_role = "user"
+    for row in rows:
+        role = row["role"]
+        content = row["content"]
+        if role != expected_role or not content:
+            continue
+        normalized.append({"role": role, "content": content})
+        expected_role = "assistant" if expected_role == "user" else "user"
+
+    if normalized and normalized[-1]["role"] != "assistant":
+        normalized.pop()
+    return normalized
+
+
 def get_history(session_id: Optional[str], max_turns: int = _MAX_TURNS) -> list[dict]:
     """Return the last `max_turns` user+assistant turn pairs as Sarvam-shaped messages."""
     if not session_id:
@@ -67,7 +84,7 @@ def get_history(session_id: Optional[str], max_turns: int = _MAX_TURNS) -> list[
             (session_id, max_turns * 2),
         ).fetchall()
     rows = list(reversed(rows))
-    return [{"role": r["role"], "content": r["content"]} for r in rows]
+    return _normalize_history(rows)
 
 
 def append_turn(session_id: Optional[str], role: str, content: str,

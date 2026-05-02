@@ -165,6 +165,9 @@ def _run_pipeline(query: str, image_b64: Optional[str],
     if _is_greeting_or_general_chat(query, image_b64):
         answer = _general_chat_answer(query)
         total_ms = _ms_since(overall_t0)
+        if session_id:
+            memory.append_turn(session_id, "user", query, language=answer.language)
+            memory.append_turn(session_id, "assistant", answer.answer, language=answer.language)
         metrics.record(
             session_id=session_id,
             manual_id=manual_id,
@@ -242,7 +245,7 @@ def _run_pipeline(query: str, image_b64: Optional[str],
     # Persist conversation turn (for follow-up questions).
     if session_id:
         memory.append_turn(session_id, "user", query, language=None)
-        if answer.answer and answer.manual_supported:
+        if answer.answer:
             memory.append_turn(session_id, "assistant", answer.answer,
                                language=answer.language)
 
