@@ -16,7 +16,7 @@
     <div class="logo">🏍️</div>
     <div>
       <h1>Bike Troubleshooting Bot</h1>
-      <p class="muted">Multilingual · grounded in your owner's manual · powered by Sarvam 105B</p>
+      <p class="muted">Multilingual · grounded in your owner's manual · powered by Sarvam or Gemini</p>
     </div>
   </div>
   <div class="tabs">
@@ -36,6 +36,12 @@
       <h3>Manual</h3>
       <select id="manual-select"></select>
       <button id="refresh-manuals" class="link">Refresh</button>
+
+      <h3>Answer Model</h3>
+      <select id="answer-model-select">
+        <option value="sarvam" selected>Sarvam</option>
+        <option value="gemini">Gemini 3 Pro</option>
+      </select>
 
       <h3>Memory</h3>
       <p class="muted" style="font-size:11px;">Multi-turn conversation. Follow-ups like "and how do I fix it?" work.</p>

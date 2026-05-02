@@ -1,14 +1,4 @@
-"""Grounded generation with Sarvam (105B, multilingual).
-
-The Sarvam model is the user-facing voice. It receives:
-  - the user's original query (in any Indic or English language),
-  - the visual observation (English),
-  - the retrieved manual chunks (English, with page numbers),
-and must answer ONLY from those chunks, in the SAME language as the query.
-
-The system prompt enforces strict grounding. The output is JSON so we can
-verify citations programmatically before showing it to the user.
-"""
+"""Grounded generation with Sarvam (105B, multilingual)."""
 from __future__ import annotations
 
 import json
@@ -18,32 +8,71 @@ from .config import settings
 from .models import Citation, GroundedAnswer, RetrievedChunk, VisionObservation
 
 
-SYSTEM_PROMPT = """You are a bike troubleshooting assistant. Your ONLY knowledge
-source is the manual chunks the user provides. Follow these rules absolutely:
+SYSTEM_PROMPT = """You are the Royal Enfield bike assistant.
 
-1. Answer ONLY using information present in the provided manual chunks. Do not
-   use general knowledge about motorcycles, even if you know the answer.
-2. If the answer is not in the chunks, set "manual_supported": false and reply
-   with a short refusal explaining the manual does not cover this and the user
-   should consult an authorized service center.
-2a. Visual observations from the photo are only for retrieval assistance. Do
-   not present image-based diagnosis, fault identification, or repair advice as
-   supported unless the provided manual chunks explicitly support that exact
-   issue.
-3. Every factual claim in your answer must be traceable to one of the chunks.
-   Cite chunks via the "citations" field with the page number and chunk_id.
-   Never mention chunk IDs, internal IDs, or raw citation objects in the
-   user-facing "answer" text.
-4. Detect the language of the user's question (Hindi, Tamil, Marathi, Bengali,
-   Telugu, Kannada, English, etc.) and write the "answer" field in THAT SAME
-   language. Use the script of that language (Devanagari for Hindi, etc.).
-   The "language" field must contain the BCP-47 code (hi, ta, mr, bn, te, kn, en).
-5. Keep the answer practical and step-by-step where the manual is step-by-step.
-6. Output STRICT JSON only — no markdown, no commentary outside the JSON.
+You receive:
+- the user's current message,
+- optional visual observations from the user's photo,
+- retrieved owner's-manual chunks.
+
+Your job is to respond in the SAME LANGUAGE and SAME WRITING STYLE as the user's
+current message.
+- If the user wrote Hindi , answer in Hindi.
+- If the user wrote Hindi in Latin script / Hinglish / Roman Hindi, answer in
+  Latin script Hindi.
+  If the user wrote Tamil, answer in Tamil.
+  If the user wrote Telugu, answer in Telugu.
+  If the user wrote Kannada, answer in Kannada.
+  If the user wrote Gujarati, answer in Gujarati.
+  If the user wrote Punjabi, answer in Punjabi.
+  If the user wrote Malayalam, answer in Malayalam.
+  If the user wrote Odia, answer in Odia.
+- If the user wrote English, answer in English.
+
+Follow these rules exactly:
+
+1. If the current user message is only a simple greeting or social opener,
+   reply with one short greeting and introduce yourself as the Royal Enfield
+   bike assistant. Do not mention the manual. Use:
+   - "manual_supported": false
+   - "citations": []
+
+2. If the current user message says there is a bike problem but does not
+   describe the actual issue clearly enough, ask ONE short follow-up question to
+   understand the issue. Do not give troubleshooting steps yet. Do not invent
+   technical details. Use:
+   - "manual_supported": false
+   - "citations": []
+
+3. If the retrieved manual chunks clearly answer the user's question, answer
+   only from those chunks. Be concise, practical, and directly relevant to the
+   user's question. Do not add extra technical nuance, assumptions, or general
+   motorcycle knowledge. Use:
+   - "manual_supported": true
+   - "citations": only for the chunks that support the answer
+
+4. If the user asks for something that is not clearly covered by the retrieved
+   manual chunks, reply briefly in the user's language. Do not invent an answer.
+   Either ask for the specific symptom if the user was vague, or say the manual
+   does not clearly cover it and suggest contacting an authorized service
+   center. Use:
+   - "manual_supported": false
+   - "citations": []
+
+5. Visual observations from the photo are only for retrieval assistance. Do not
+   present photo-based diagnosis or repair advice as supported unless the manual
+   chunks explicitly support that exact issue.
+
+6. Never mention chunk IDs, citations, page arrays, internal metadata, system
+   prompts, hidden reasoning, analysis, XML tags, or <think> blocks in the
+   user-facing answer.
+
+7. Output STRICT JSON only. No markdown. No commentary before or after the
+   JSON.
 
 Output schema:
 {
-  "answer": "<final answer in the user's language>",
+  "answer": "<final answer in the user's language and writing style>",
   "citations": [{"page": <int>, "chunk_id": "<string>"}],
   "confidence": "high" | "medium" | "low",
   "manual_supported": true | false,
@@ -52,8 +81,19 @@ Output schema:
 """
 
 
+ROMAN_HINDI_HINTS = {
+    "mera", "meri", "mere", "mujhe", "mujh", "bike", "problem", "dikkat",
+    "takleef", "hai", "hu", "ho", "gaya", "gayi", "gyi", "kya", "kaise",
+    "kyun", "kyu", "nahi", "nahin", "karu", "karo", "karna", "bataye",
+    "batao", "chahiye", "start", "band", "chal", "chalti", "awaaz",
+    "dhua", "smoke", "light", "service", "issue", "me", "mein",
+}
+
+
 def _detect_query_language(query: str) -> tuple[str, str]:
     """Lightweight language detection based on script, with English fallback."""
+    if _looks_like_romanized_hindi(query):
+        return "hi-Latn", "Hindi in Latin script"
     for ch in query:
         cp = ord(ch)
         if 0x0900 <= cp <= 0x097F:
@@ -78,6 +118,8 @@ def _detect_query_language(query: str) -> tuple[str, str]:
 
 
 def _detect_text_language(text: str) -> str:
+    if _looks_like_romanized_hindi(text):
+        return "hi-Latn"
     for ch in text or "":
         cp = ord(ch)
         if 0x0900 <= cp <= 0x097F:
@@ -101,11 +143,22 @@ def _detect_text_language(text: str) -> str:
     return "en"
 
 
+def _looks_like_romanized_hindi(text: str) -> bool:
+    cleaned = re.sub(r"[^a-zA-Z\s]", " ", text or "").lower()
+    words = [w for w in cleaned.split() if w]
+    if not words:
+        return False
+    hits = sum(1 for w in words if w in ROMAN_HINDI_HINTS)
+    return hits >= 2
+
+
 def _answer_matches_language(answer_text: str, returned_language: str | None,
                              target_language_code: str) -> bool:
+    detected = _detect_text_language(answer_text)
+    if target_language_code.lower() == "hi-latn":
+        return detected == "hi-Latn"
     if (returned_language or "").lower() == target_language_code.lower():
         return True
-    detected = _detect_text_language(answer_text)
     return detected == target_language_code.lower()
 
 
@@ -144,8 +197,43 @@ def _build_user_message(query: str, vision: VisionObservation | None,
     )
 
 
+def _format_history_block(history: list[dict] | None) -> str:
+    if not history:
+        return ""
+    parts: list[str] = []
+    for turn in history[-8:]:
+        role = (turn.get("role") or "").strip().lower()
+        content = (turn.get("content") or "").strip()
+        if not role or not content:
+            continue
+        label = "User" if role == "user" else "Assistant"
+        parts.append(f"{label}: {content}")
+    if not parts:
+        return ""
+    return "RECENT CONVERSATION HISTORY:\n" + "\n".join(parts) + "\n\n"
+
+
+def _build_gemini_prompt(query: str,
+                         vision: VisionObservation | None,
+                         chunks: list[RetrievedChunk],
+                         history: list[dict] | None,
+                         target_language_code: str,
+                         target_language_name: str) -> str:
+    return (
+        _format_history_block(history)
+        + _build_user_message(
+            query,
+            vision,
+            chunks,
+            target_language_code,
+            target_language_name,
+        )
+    )
+
+
 def _parse_json(text: str) -> dict:
     text = (text or "").strip()
+    text = _strip_thinking_blocks(text)
     fenced = re.match(r"```(?:json)?\s*(.+?)\s*```", text, re.S)
     if fenced:
         text = fenced.group(1)
@@ -162,9 +250,16 @@ def _parse_json(text: str) -> dict:
     return {}
 
 
+def _strip_thinking_blocks(text: str) -> str:
+    text = text or ""
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.I | re.S)
+    text = re.sub(r"^\s*<think>.*$", "", text, flags=re.I | re.S)
+    return text.strip()
+
+
 def sanitize_answer_text(text: str) -> str:
     """Remove internal citation identifiers from user-facing answer text."""
-    cleaned = (text or "").strip()
+    cleaned = _strip_thinking_blocks(text or "")
     cleaned = re.sub(r"\bchunk_id\s*[:=]\s*[A-Za-z0-9_-]+\b", "", cleaned, flags=re.I)
     cleaned = re.sub(r"\b[A-Fa-f0-9]{16,}\b", "", cleaned)
     cleaned = re.sub(r"(?:\[\s*\d+\s*,?\s*\]\s*,?\s*){1,}", "", cleaned)
@@ -174,11 +269,27 @@ def sanitize_answer_text(text: str) -> str:
     return cleaned.strip()
 
 
-def _rewrite_answer_in_target_language(answer_text: str,
-                                       target_language_code: str,
-                                       target_language_name: str) -> str:
-    if not answer_text or not settings.sarvam_api_key:
-        return answer_text
+def _clean_rewrite_output(text: str) -> str:
+    cleaned = sanitize_answer_text(text)
+    if "Final Answer:" in cleaned:
+        cleaned = cleaned.split("Final Answer:")[-1].strip()
+    cleaned = cleaned.strip("`").strip()
+    if "\n" in cleaned and any(marker in cleaned for marker in (
+        "Understand the Task", "Translate to", "Check against Constraints",
+        "Final Polish", "Construct the Final Output",
+    )):
+        lines = [ln.strip("` ").strip() for ln in cleaned.splitlines() if ln.strip()]
+        if lines:
+            cleaned = lines[-1]
+    return sanitize_answer_text(cleaned)
+
+
+def _repair_json_response(draft_text: str,
+                          target_language_code: str,
+                          target_language_name: str) -> dict:
+    draft_text = sanitize_answer_text(draft_text)
+    if not draft_text or not settings.sarvam_api_key:
+        return {}
     try:
         from sarvamai import SarvamAI
         client = SarvamAI(api_subscription_key=settings.sarvam_api_key)
@@ -188,16 +299,27 @@ def _rewrite_answer_in_target_language(answer_text: str,
                 {
                     "role": "system",
                     "content": (
-                        "Rewrite the assistant answer in the requested target language only. "
-                        "Preserve meaning exactly. Do not add or remove facts. "
-                        "Do not mention chunk IDs, citations, or internal metadata."
+                        "Convert the draft assistant reply into STRICT JSON only.\n"
+                        "Do not add new facts.\n"
+                        "Never include <think> tags, analysis, or commentary.\n"
+                        "If the draft is a greeting or clarification, set manual_supported to false "
+                        "and citations to an empty array.\n"
+                        "If the draft contains no reliable manual-backed facts, keep citations empty."
                     ),
                 },
                 {
                     "role": "user",
                     "content": (
+                        "Output schema:\n"
+                        "{\n"
+                        '  "answer": "<final answer>",\n'
+                        '  "citations": [{"page": <int>, "chunk_id": "<string>"}],\n'
+                        '  "confidence": "high" | "medium" | "low",\n'
+                        '  "manual_supported": true | false,\n'
+                        '  "language": "<bcp-47 code>"\n'
+                        "}\n\n"
                         f"Target language: {target_language_name} ({target_language_code})\n\n"
-                        f"Answer to rewrite:\n{answer_text}"
+                        f"Draft reply:\n{draft_text}"
                     ),
                 },
             ],
@@ -205,18 +327,69 @@ def _rewrite_answer_in_target_language(answer_text: str,
             top_p=1,
             max_tokens=1200,
         )
-        rewritten = response.choices[0].message.content or answer_text
-        return sanitize_answer_text(rewritten)
+        repaired = getattr(response.choices[0].message, "content", "") or ""
+        return _parse_json(repaired)
     except Exception:
-        return answer_text
+        return {}
 
 
-def _refusal(reason: str, language: str = "en") -> GroundedAnswer:
+def _parse_answer_json(raw: str,
+                       query: str,
+                       target_language_code: str,
+                       target_language_name: str) -> dict:
+    parsed = _parse_json(raw)
+    if not parsed and raw:
+        parsed = _repair_json_response(raw, target_language_code, target_language_name)
+    if parsed:
+        return parsed
+    fallback = _fallback_answer(query, target_language_code)
+    return {
+        "answer": fallback.answer,
+        "citations": [],
+        "confidence": fallback.confidence,
+        "manual_supported": fallback.manual_supported,
+        "language": fallback.language,
+    }
+
+
+def _fallback_answer(query: str, language: str) -> GroundedAnswer:
+    q = (query or "").strip().lower()
+    greeting_words = {"hi", "hello", "hey", "good morning", "good afternoon", "good evening", "namaste", "namaskar", "thanks", "thank you"}
+    is_greeting = q in greeting_words
+    vague_problem = (
+        "problem" in q or "issue" in q or "dikkat" in q or "takleef" in q or "समस्या" in query
+    ) and len(q.split()) <= 8
+
+    if language == "hi-Latn":
+        if is_greeting:
+            text = "Namaste, main Royal Enfield bike assistant hoon. Aap apni bike ki problem ya specifications ke baare mein pooch sakte hain."
+        elif vague_problem:
+            text = "Ji, bike mein kya exact issue aa raha hai? Kripya symptom thoda detail mein batayein."
+        else:
+            text = "Mujhe is baare mein manual se clear jaankari nahi mili. Kripya exact symptom batayein, ya authorized service center se sampark karein."
+    elif language == "hi":
+        if is_greeting:
+            text = "नमस्ते, मैं Royal Enfield bike assistant हूं। आप अपनी बाइक की समस्या या specifications के बारे में पूछ सकते हैं।"
+        elif vague_problem:
+            text = "जी, बाइक में ठीक कौन सी समस्या आ रही है? कृपया लक्षण थोड़ा विस्तार से बताइए।"
+        else:
+            text = "मुझे इस बारे में मैनुअल से स्पष्ट जानकारी नहीं मिली। कृपया सही लक्षण बताइए, या अधिकृत सर्विस सेंटर से संपर्क करें।"
+    elif language == "ta":
+        if is_greeting:
+            text = "வணக்கம், நான் Royal Enfield bike assistant. உங்கள் பைக் பிரச்சனை அல்லது specifications பற்றி கேட்கலாம்."
+        elif vague_problem:
+            text = "சரி, பைக்கில் என்ன சரியான பிரச்சனை வருகிறது? அறிகுறியை கொஞ்சம் விளக்கமாக சொல்லுங்கள்."
+        else:
+            text = "இந்த விஷயத்திற்கு கையேட்டில் தெளிவான தகவல் கிடைக்கவில்லை. சரியான அறிகுறியை சொல்லுங்கள், அல்லது அதிகாரப்பூர்வ சேவை மையத்தை தொடர்புகொள்ளுங்கள்."
+    else:
+        if is_greeting:
+            text = "Hi, I am the Royal Enfield bike assistant. You can ask me about your bike issue or key specifications."
+        elif vague_problem:
+            text = "Sure, what exact issue are you facing with the bike? Please describe the symptom a bit more."
+        else:
+            text = "I could not find clear guidance for this in the manual. Please share the exact symptom, or contact an authorized service center."
     return GroundedAnswer(
-        answer=(
-            "The manual does not contain specific guidance on this issue. "
-            "Please consult an authorized service center."
-        ),
+        answer=text,
         citations=[],
         confidence="low",
         manual_supported=False,
@@ -224,33 +397,84 @@ def _refusal(reason: str, language: str = "en") -> GroundedAnswer:
     )
 
 
-def generate(query: str, vision: VisionObservation | None,
-             chunks: list[RetrievedChunk],
-             history: list[dict] | None = None) -> tuple[GroundedAnswer, dict]:
-    """Call Sarvam 105B for the grounded answer.
+def _rewrite_answer_in_target_language(answer_text: str,
+                                       target_language_code: str,
+                                       target_language_name: str) -> str:
+    if not answer_text:
+        return answer_text
+    try:
+        if settings.gemini_api_key:
+            import google.generativeai as genai
 
-    Returns:
-        (GroundedAnswer, usage)  where usage = {input_tokens, output_tokens}
-    """
+            genai.configure(api_key=settings.gemini_api_key)
+            model = genai.GenerativeModel(settings.gemini_rewriter_model)
+            response = model.generate_content(
+                (
+                    "Rewrite the assistant answer in the requested target language only.\n"
+                    "Preserve meaning exactly. Do not add or remove facts.\n"
+                    "Do not mention chunk IDs, citations, internal metadata, XML tags, "
+                    "analysis, or thinking.\n"
+                    "If the target language is Hindi in Latin script, write Hindi using "
+                    "Latin letters only.\n"
+                    "Return only the final rewritten answer.\n\n"
+                    f"Target language: {target_language_name} ({target_language_code})\n\n"
+                    f"Answer to rewrite:\n{answer_text}"
+                ),
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.0,
+                    top_p=1,
+                    max_output_tokens=1200,
+                ),
+            )
+            rewritten = getattr(response, "text", "") or answer_text
+            return _clean_rewrite_output(rewritten)
+
+        if settings.sarvam_api_key:
+            from sarvamai import SarvamAI
+            client = SarvamAI(api_subscription_key=settings.sarvam_api_key)
+            response = client.chat.completions(
+                model=settings.sarvam_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Rewrite the assistant answer in the requested target language only. "
+                            "Preserve meaning exactly. Do not add or remove facts. "
+                            "Do not mention chunk IDs, citations, internal metadata, XML tags, or thinking. "
+                            "If the target language is Hindi in Latin script, write Hindi using Latin letters only. "
+                            "Return only the final rewritten answer."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Target language: {target_language_name} ({target_language_code})\n\n"
+                            f"Answer to rewrite:\n{answer_text}"
+                        ),
+                    },
+                ],
+                temperature=0.0,
+                top_p=1,
+                max_tokens=1200,
+            )
+            rewritten = getattr(response.choices[0].message, "content", "") or answer_text
+            return _clean_rewrite_output(rewritten)
+    except Exception:
+        return answer_text
+    return answer_text
+
+
+def _refusal(reason: str, language: str = "en") -> GroundedAnswer:
+    return _fallback_answer("unsupported", language)
+
+
+def _generate_with_sarvam(query: str,
+                          vision: VisionObservation | None,
+                          chunks: list[RetrievedChunk],
+                          history: list[dict] | None,
+                          target_language_code: str,
+                          target_language_name: str) -> tuple[dict, dict]:
     usage = {"input_tokens": 0, "output_tokens": 0}
-    target_language_code, target_language_name = _detect_query_language(query)
-
-    if not chunks:
-        return _refusal("No manual chunks retrieved.", language=target_language_code), usage
-
-    if not settings.sarvam_api_key:
-        return GroundedAnswer(
-            answer=(
-                "(Sarvam API key not configured. Add SARVAM_API_KEY to api.env "
-                "to enable multilingual answers. Top retrieved chunk preview: "
-                f"{chunks[0].chunk.text[:200]}...)"
-            ),
-            citations=[Citation(page=chunks[0].chunk.page, chunk_id=chunks[0].chunk.chunk_id)],
-            confidence="low",
-            manual_supported=False,
-            language=target_language_code,
-        ), usage
-
     messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
     if history:
         messages.extend(history)
@@ -265,26 +489,17 @@ def generate(query: str, vision: VisionObservation | None,
         ),
     })
 
-    try:
-        from sarvamai import SarvamAI
-        client = SarvamAI(api_subscription_key=settings.sarvam_api_key)
-        response = client.chat.completions(
-            model=settings.sarvam_model,
-            messages=messages,
-            temperature=0.2,
-            top_p=1,
-            max_tokens=2000,
-        )
-    except Exception as e:
-        return GroundedAnswer(
-            answer=f"(Sarvam API error: {e}. Check api.env and try again.)",
-            citations=[],
-            confidence="low",
-            manual_supported=False,
-            language=target_language_code,
-        ), usage
+    from sarvamai import SarvamAI
 
-    # Token usage — the SDK response mirrors OpenAI's shape but field access varies.
+    client = SarvamAI(api_subscription_key=settings.sarvam_api_key)
+    response = client.chat.completions(
+        model=settings.sarvam_model,
+        messages=messages,
+        temperature=0.2,
+        top_p=1,
+        max_tokens=2000,
+    )
+
     u = getattr(response, "usage", None)
     if u is not None:
         if hasattr(u, "prompt_tokens"):
@@ -294,11 +509,115 @@ def generate(query: str, vision: VisionObservation | None,
             usage["input_tokens"] = int(u.get("prompt_tokens") or 0)
             usage["output_tokens"] = int(u.get("completion_tokens") or 0)
 
+    raw = getattr(response.choices[0].message, "content", "") or ""
+    return _parse_answer_json(raw, query, target_language_code, target_language_name), usage
+
+
+def _generate_with_gemini(query: str,
+                          vision: VisionObservation | None,
+                          chunks: list[RetrievedChunk],
+                          history: list[dict] | None,
+                          target_language_code: str,
+                          target_language_name: str) -> tuple[dict, dict]:
+    usage = {"input_tokens": 0, "output_tokens": 0}
+
+    import google.generativeai as genai
+
+    genai.configure(api_key=settings.gemini_api_key)
+    model = genai.GenerativeModel(
+        settings.gemini_answer_model,
+        system_instruction=SYSTEM_PROMPT,
+    )
+    response = model.generate_content(
+        _build_gemini_prompt(
+            query,
+            vision,
+            chunks,
+            history,
+            target_language_code,
+            target_language_name,
+        ),
+        generation_config=genai.types.GenerationConfig(
+            temperature=0.2,
+            top_p=1,
+            max_output_tokens=2000,
+            response_mime_type="application/json",
+        ),
+    )
+
+    meta = getattr(response, "usage_metadata", None)
+    if meta is not None:
+        usage["input_tokens"] = int(getattr(meta, "prompt_token_count", 0) or 0)
+        usage["output_tokens"] = int(getattr(meta, "candidates_token_count", 0) or 0)
+
+    raw = getattr(response, "text", "") or ""
+    return _parse_answer_json(raw, query, target_language_code, target_language_name), usage
+
+
+def generate(query: str, vision: VisionObservation | None,
+             chunks: list[RetrievedChunk],
+             history: list[dict] | None = None,
+             answer_model: str = "sarvam") -> tuple[GroundedAnswer, dict]:
+    """Call Sarvam 105B for the grounded answer.
+
+    Returns:
+        (GroundedAnswer, usage)  where usage = {input_tokens, output_tokens}
+    """
+    usage = {"input_tokens": 0, "output_tokens": 0}
+    target_language_code, target_language_name = _detect_query_language(query)
+
+    if not chunks:
+        return _refusal("No manual chunks retrieved.", language=target_language_code), usage
+
     try:
-        raw = response.choices[0].message.content or ""
-    except Exception:
-        raw = str(response)
-    parsed = _parse_json(raw)
+        if answer_model == "gemini":
+            if not settings.gemini_api_key:
+                return GroundedAnswer(
+                    answer=(
+                        "(Gemini API key not configured. Add GEMINI_API_KEY to api.env "
+                        "to enable Gemini answers.)"
+                    ),
+                    citations=[],
+                    confidence="low",
+                    manual_supported=False,
+                    language=target_language_code,
+                ), usage
+            parsed, usage = _generate_with_gemini(
+                query,
+                vision,
+                chunks,
+                history,
+                target_language_code,
+                target_language_name,
+            )
+        else:
+            if not settings.sarvam_api_key:
+                return GroundedAnswer(
+                    answer=(
+                        "(Sarvam API key not configured. Add SARVAM_API_KEY to api.env "
+                        "to enable multilingual answers.)"
+                    ),
+                    citations=[],
+                    confidence="low",
+                    manual_supported=False,
+                    language=target_language_code,
+                ), usage
+            parsed, usage = _generate_with_sarvam(
+                query,
+                vision,
+                chunks,
+                history,
+                target_language_code,
+                target_language_name,
+            )
+    except Exception as e:
+        return GroundedAnswer(
+            answer=f"(LLM API error: {e}. Check api.env and try again.)",
+            citations=[],
+            confidence="low",
+            manual_supported=False,
+            language=target_language_code,
+        ), usage
 
     citations = [
         Citation(page=int(c.get("page", 0)), chunk_id=str(c.get("chunk_id", "")))

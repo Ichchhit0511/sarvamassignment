@@ -96,6 +96,7 @@ const chatLog = $("#chat-log");
 const queryInput = $("#query-input");
 const imageInput = $("#image-input");
 const imagePill = $("#image-pill");
+const answerModelSelect = $("#answer-model-select");
 let pendingImage = null;
 
 imageInput.addEventListener("change", async () => {
@@ -125,8 +126,6 @@ function renderAnswer(resp) {
     } else if (uniq.length > 1) {
       html += `<div class="citations">📖 You can refer to pages ${uniq.join(", ")} of the manual for more details.</div>`;
     }
-  } else if (!a.manual_supported) {
-    html += `<div class="citations">This is not covered in the manual. Please contact an authorized service center.</div>`;
   }
   return html;
 }
@@ -164,6 +163,7 @@ $("#chat-form").addEventListener("submit", async (e) => {
         query: text || "Help me troubleshoot the issue in this photo.",
         image_b64: sentImage,
         session_id: SESSION_ID,
+        answer_model: answerModelSelect?.value || "sarvam",
       }),
     });
     const data = await parseResponseOrThrow(r);

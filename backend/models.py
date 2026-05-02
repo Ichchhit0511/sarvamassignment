@@ -47,6 +47,7 @@ class QueryRequest(BaseModel):
     query: str
     image_b64: Optional[str] = None
     session_id: Optional[str] = None
+    answer_model: Optional[str] = "sarvam"
 
 
 class QueryMetrics(BaseModel):

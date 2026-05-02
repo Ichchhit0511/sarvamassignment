@@ -115,10 +115,19 @@ def _detect_query_language(query: str) -> str:
     q = _normalize_query(query)
     if q in {"namaste", "namaskar", "namaskaar"}:
         return "hi"
+    roman_hindi_hints = {
+        "mera", "meri", "mere", "mujhe", "bike", "problem", "dikkat",
+        "takleef", "hai", "ho", "gayi", "gyi", "kya", "kaise", "nahi",
+        "issue", "me", "mein",
+    }
+    if sum(1 for w in q.split() if w in roman_hindi_hints) >= 2:
+        return "hi-Latn"
     for ch in query:
         cp = ord(ch)
         if 0x0900 <= cp <= 0x097F:
             return "hi"
+        if 0x0A80 <= cp <= 0x0AFF:
+            return "gu"
         if 0x0B80 <= cp <= 0x0BFF:
             return "ta"
     return "en"
@@ -263,10 +272,20 @@ def _general_chat_answer(query: str) -> GroundedAnswer:
 
 
 def _localized_manual_refusal(language: str) -> str:
+    if language == "hi-Latn":
+        return (
+            "Manual mein is issue ke baare mein paryapt aur clear jaankari nahi hai. "
+            "Kripya authorized service center se sampark karein ya nearest service centre par jaayein."
+        )
     if language == "hi":
         return (
             "मैनुअल में इस समस्या के बारे में पर्याप्त और स्पष्ट जानकारी उपलब्ध नहीं है। "
             "कृपया अधिकृत सर्विस सेंटर से संपर्क करें या अपने नजदीकी सर्विस सेंटर पर जाएं।"
+        )
+    if language == "gu":
+        return (
+            "મેન્યુઅલમાં આ સમસ્યા વિશે પૂરતી અને સ્પષ્ટ માહિતી ઉપલબ્ધ નથી. "
+            "કૃપા કરીને અધિકૃત સર્વિસ સેન્ટરનો સંપર્ક કરો અથવા નજીકના સર્વિસ સેન્ટર પર જાઓ."
         )
     if language == "ta":
         return (
@@ -320,49 +339,10 @@ def _image_issue_supported_by_chunks(vision_text: str, retrieved) -> bool:
 
 def _run_pipeline(query: str, image_b64: Optional[str],
                   manual_id: Optional[str],
-                  session_id: Optional[str] = None) -> QueryResponse:
+                  session_id: Optional[str] = None,
+                  answer_model: str = "sarvam") -> QueryResponse:
     overall_t0 = time.time()
     error_str: Optional[str] = None
-
-    query_category = _classify_query_category(query, image_b64)
-    if query_category == "greeting":
-        answer = _general_chat_answer(query)
-        total_ms = _ms_since(overall_t0)
-        if session_id:
-            memory.append_turn(session_id, "user", query, language=answer.language)
-            memory.append_turn(session_id, "assistant", answer.answer, language=answer.language)
-        metrics.record(
-            session_id=session_id,
-            manual_id=manual_id,
-            query=query[:500],
-            language=answer.language,
-            has_image=0,
-            num_rewrites=0,
-            num_retrieved=0,
-            top_retrieval_score=0.0,
-            manual_supported=1,
-            confidence=answer.confidence,
-            num_citations_raw=0,
-            num_citations_kept=0,
-            sarvam_input_tokens=0,
-            sarvam_output_tokens=0,
-            gemini_input_tokens=0,
-            gemini_output_tokens=0,
-            vision_ms=0,
-            rewrite_ms=0,
-            retrieve_ms=0,
-            generate_ms=0,
-            verify_ms=0,
-            total_ms=total_ms,
-            error=error_str,
-        )
-        return QueryResponse(
-            answer=answer,
-            vision=None,
-            rewrites=[],
-            retrieved=[],
-            metrics=QueryMetrics(total_ms=total_ms),
-        )
 
     # Stage 1: Vision
     t0 = time.time()
@@ -394,7 +374,13 @@ def _run_pipeline(query: str, image_b64: Optional[str],
     # Stage 4: Generate (with conversation history)
     history = memory.get_history(session_id) if session_id else []
     t0 = time.time()
-    raw_answer, sarvam_usage = generate(query, vision, retrieved, history=history)
+    raw_answer, sarvam_usage = generate(
+        query,
+        vision,
+        retrieved,
+        history=history,
+        answer_model=answer_model,
+    )
     generate_ms = _ms_since(t0)
 
     # Stage 5: Verify
@@ -478,7 +464,13 @@ def _run_pipeline(query: str, image_b64: Optional[str],
 @app.post("/api/query", response_model=QueryResponse)
 async def api_query(req: QueryRequest):
     try:
-        return _run_pipeline(req.query, req.image_b64, req.manual_id, req.session_id)
+        return _run_pipeline(
+            req.query,
+            req.image_b64,
+            req.manual_id,
+            req.session_id,
+            req.answer_model or "sarvam",
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -523,8 +515,6 @@ def _format_for_whatsapp(answer: GroundedAnswer) -> str:
             body += f"\n\n📖 You can refer to page {pages[0]} of the manual for more details."
         elif pages:
             body += f"\n\n📖 You can refer to pages {', '.join(map(str, pages))} of the manual for more details."
-    elif not answer.manual_supported:
-        body += "\n\nThis is not covered in the manual. Please contact an authorized service center."
     return body
 
 
