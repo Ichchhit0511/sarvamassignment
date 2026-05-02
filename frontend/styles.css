@@ -270,3 +270,39 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: upp
 #recent-table .q-cell { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #recent-table .conf-pill { padding: 2px 8px; border-radius: 999px; font-weight: 600; font-size: 11px; }
 
+@media (max-width: 880px) {
+  main {
+    padding: 16px;
+  }
+
+  #tab-chat.active {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-pane {
+    height: auto;
+    min-height: 70vh;
+  }
+
+  .chat-log {
+    padding: 16px;
+  }
+
+  .bubble {
+    max-width: 90%;
+  }
+
+  .composer {
+    flex-wrap: wrap;
+  }
+
+  .composer input[type=text] {
+    min-width: 0;
+    width: 100%;
+    order: 2;
+  }
+
+  .composer .primary {
+    order: 3;
+  }
+}
