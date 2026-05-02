@@ -100,7 +100,7 @@ def main() -> None:
     ]
 
     # ------------------------------------------------------------ 1) index
-    banner("Stage 1 — Indexing 4 chunks with REAL Gemini text-embedding-004")
+    banner("Stage 1 — Indexing 4 chunks with REAL Gemini gemini-embedding-001")
     t0 = time.time()
     _save_chroma(chunks)
     _save_bm25(chunks)

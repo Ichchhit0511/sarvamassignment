@@ -13,7 +13,7 @@ Multimodal RAG bot that answers bike issues **only** from the user's manual,
 in **the same language** the user asked in (Hindi / Tamil / Marathi / English / etc.).
 
 - **Final answer LLM**: Sarvam 105B (multilingual, grounded)
-- **Vision + embeddings + query rewriting**: Gemini 2.0 Flash + text-embedding-004
+- **Vision + embeddings + query rewriting**: Gemini 2.0 Flash + gemini-embedding-001
 - **Retrieval**: ChromaDB (vector) + BM25 (keyword) → Reciprocal Rank Fusion → optional Cohere re-rank
 - **Guardrail**: citation verifier downgrades unsupported claims
 - **Channels**: web UI **and** WhatsApp (via Whapi)

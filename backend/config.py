@@ -49,7 +49,7 @@ def load_settings() -> Settings:
         sarvam_base_url=_get("SARVAM_BASE_URL", "https://api.sarvam.ai"),
         gemini_api_key=_get("GEMINI_API_KEY"),
         gemini_vision_model=_get("GEMINI_VISION_MODEL", "gemini-2.0-flash-exp"),
-        gemini_embed_model=_get("GEMINI_EMBED_MODEL", "text-embedding-004"),
+        gemini_embed_model=_get("GEMINI_EMBED_MODEL", "gemini-embedding-001"),
         gemini_rewriter_model=_get("GEMINI_REWRITER_MODEL", "gemini-2.0-flash-exp"),
         cohere_api_key=_get("COHERE_API_KEY"),
         cohere_rerank_model=_get("COHERE_RERANK_MODEL", "rerank-v3.5"),

@@ -4,7 +4,7 @@ Steps:
   1. Parse PDF page-by-page (text + tables).
   2. Group lines into section-aware chunks (~400-600 tokens).
   3. Tag with component/symptom keywords.
-  4. Embed with Gemini text-embedding-004.
+  4. Embed with Gemini gemini-embedding-001.
   5. Store in ChromaDB + BM25 keyword index.
 """
 from __future__ import annotations
