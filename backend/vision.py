@@ -66,25 +66,30 @@ def describe_image(image_b64: Optional[str]) -> tuple[Optional[VisionObservation
     import google.generativeai as genai
     genai.configure(api_key=settings.gemini_api_key)
 
-    img = _decode_image(image_b64)
-    model = genai.GenerativeModel(settings.gemini_vision_model)
-    response = model.generate_content([VISION_PROMPT, img])
-    raw = (response.text or "").strip()
-    parsed = _parse_json(raw)
+    try:
+        img = _decode_image(image_b64)
+        model = genai.GenerativeModel(settings.gemini_vision_model)
+        response = model.generate_content([VISION_PROMPT, img])
+        raw = (response.text or "").strip()
+        parsed = _parse_json(raw)
 
-    meta = getattr(response, "usage_metadata", None)
-    if meta is not None:
-        usage["input_tokens"] = int(getattr(meta, "prompt_token_count", 0) or 0)
-        usage["output_tokens"] = int(getattr(meta, "candidates_token_count", 0) or 0)
+        meta = getattr(response, "usage_metadata", None)
+        if meta is not None:
+            usage["input_tokens"] = int(getattr(meta, "prompt_token_count", 0) or 0)
+            usage["output_tokens"] = int(getattr(meta, "candidates_token_count", 0) or 0)
 
-    return VisionObservation(
-        issue_type=parsed.get("issue_type"),
-        color=parsed.get("color"),
-        origin=parsed.get("origin"),
-        intensity=parsed.get("intensity"),
-        additional_observations=parsed.get("additional_observations") or [],
-        raw=raw,
-    ), usage
+        return VisionObservation(
+            issue_type=parsed.get("issue_type"),
+            color=parsed.get("color"),
+            origin=parsed.get("origin"),
+            intensity=parsed.get("intensity"),
+            additional_observations=parsed.get("additional_observations") or [],
+            raw=raw,
+        ), usage
+    except Exception as e:
+        return VisionObservation(
+            raw=f"(Vision analysis unavailable: {e}. Continuing without image understanding.)"
+        ), usage
 
 
 def vision_to_text(obs: Optional[VisionObservation]) -> str:

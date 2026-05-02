@@ -302,7 +302,13 @@ def _run_pipeline(query: str, image_b64: Optional[str],
 
 @app.post("/api/query", response_model=QueryResponse)
 async def api_query(req: QueryRequest):
-    return _run_pipeline(req.query, req.image_b64, req.manual_id, req.session_id)
+    try:
+        return _run_pipeline(req.query, req.image_b64, req.manual_id, req.session_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("Query pipeline error")
+        raise HTTPException(500, f"Query failed: {e}")
 
 
 # ---------------------------------------------------------------------------

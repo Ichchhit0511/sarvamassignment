@@ -44,6 +44,33 @@ async function fileToBase64(file) {
   });
 }
 
+async function parseResponseOrThrow(response) {
+  const contentType = response.headers.get("content-type") || "";
+  const bodyText = await response.text();
+
+  let data = null;
+  if (contentType.includes("application/json")) {
+    try {
+      data = JSON.parse(bodyText);
+    } catch (err) {
+      throw new Error(bodyText || "Invalid JSON response from server.");
+    }
+  }
+
+  if (!response.ok) {
+    const detail = data?.detail || data?.error || bodyText || `Request failed with status ${response.status}`;
+    throw new Error(String(detail));
+  }
+
+  if (data != null) return data;
+
+  try {
+    return JSON.parse(bodyText);
+  } catch (err) {
+    throw new Error(bodyText || "Invalid response from server.");
+  }
+}
+
 function el(tag, cls, html) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -139,7 +166,7 @@ $("#chat-form").addEventListener("submit", async (e) => {
         session_id: SESSION_ID,
       }),
     });
-    const data = await r.json();
+    const data = await parseResponseOrThrow(r);
     thinking.querySelector(".bubble").innerHTML = renderAnswer(data);
   } catch (err) {
     thinking.querySelector(".bubble").textContent = "Error: " + err.message;
@@ -161,7 +188,7 @@ $("#clear-memory").addEventListener("click", async () => {
 // =======================================================================
 async function loadManuals() {
   const r = await fetch(api("/api/manuals"));
-  const data = await r.json();
+  const data = await parseResponseOrThrow(r);
   const tbody = $("#manuals-table tbody");
   tbody.innerHTML = "";
   const sel = $("#manual-select");
@@ -191,7 +218,7 @@ $("#ingest-form").addEventListener("submit", async (e) => {
   $("#ingest-status").textContent = "Ingesting… this can take a minute for large PDFs.";
   try {
     const r = await fetch(api("/api/ingest"), { method: "POST", body: fd });
-    const data = await r.json();
+    const data = await parseResponseOrThrow(r);
     $("#ingest-status").textContent = data.ok
       ? `✅ Ingested ${data.chunks} chunks across ${data.pages} pages.`
       : `❌ ${JSON.stringify(data)}`;
