@@ -14,9 +14,6 @@ from .models import GroundedAnswer, RetrievedChunk
 
 def verify(answer: GroundedAnswer,
            retrieved: list[RetrievedChunk]) -> GroundedAnswer:
-    if not answer.manual_supported:
-        return answer
-
     valid_ids = {rc.chunk.chunk_id for rc in retrieved}
     valid_pages = {rc.chunk.page for rc in retrieved}
 
@@ -24,6 +21,20 @@ def verify(answer: GroundedAnswer,
         c for c in answer.citations
         if c.chunk_id in valid_ids or c.page in valid_pages
     ]
+
+    if kept:
+        # If the model produced valid citations, treat the answer as grounded
+        # even when it forgot to set manual_supported=true in the JSON.
+        return GroundedAnswer(
+            answer=answer.answer,
+            citations=kept,
+            confidence=answer.confidence,
+            manual_supported=True,
+            language=answer.language,
+        )
+
+    if not answer.manual_supported:
+        return answer
 
     if not kept:
         # Sarvam claimed manual support but cited nothing real — downgrade.
@@ -37,8 +48,8 @@ def verify(answer: GroundedAnswer,
 
     return GroundedAnswer(
         answer=answer.answer,
-        citations=kept,
-        confidence=answer.confidence,
-        manual_supported=True,
+        citations=[],
+        confidence="low",
+        manual_supported=False,
         language=answer.language,
     )

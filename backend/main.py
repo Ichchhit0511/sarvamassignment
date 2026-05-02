@@ -104,7 +104,17 @@ def _ms_since(t0: float) -> int:
     return int((time.time() - t0) * 1000)
 
 
+def _normalize_query(query: str) -> str:
+    q = (query or "").strip().lower()
+    q = re.sub(r"[^\w\s]", " ", q)
+    q = re.sub(r"\s+", " ", q).strip()
+    return q
+
+
 def _detect_query_language(query: str) -> str:
+    q = _normalize_query(query)
+    if q in {"namaste", "namaskar", "namaskaar"}:
+        return "hi"
     for ch in query:
         cp = ord(ch)
         if 0x0900 <= cp <= 0x097F:
@@ -114,33 +124,129 @@ def _detect_query_language(query: str) -> str:
     return "en"
 
 
-def _is_greeting_or_general_chat(query: str, image_b64: Optional[str]) -> bool:
+def _heuristic_query_category(query: str, image_b64: Optional[str]) -> str:
     if image_b64:
-        return False
-    q = (query or "").strip().lower()
+        return "bike"
+    q = _normalize_query(query)
     if not q:
-        return False
-    q = re.sub(r"[^\w\s]", " ", q)
-    q = re.sub(r"\s+", " ", q).strip()
-    general_patterns = [
+        return "greeting"
+    if query.strip() in {"வணக்கம்", "नमस्ते", "नमस्कार"}:
+        return "greeting"
+    greeting_patterns = [
         r"^(hi|hello|hey|hii|good morning|good afternoon|good evening)$",
+        r"^(namaste|namaskar|namaskaar)$",
         r"^(who are you|what can you do|help|start)$",
         r"^(thanks|thank you|ok|okay)$",
     ]
-    return any(re.match(pattern, q) for pattern in general_patterns)
+    if any(re.match(pattern, q) for pattern in greeting_patterns):
+        return "greeting"
+    return "bike"
+
+
+def _translate_query_to_english(query: str) -> str:
+    query = (query or "").strip()
+    if not query:
+        return ""
+    if _detect_query_language(query) == "en":
+        return query
+    if not settings.gemini_api_key:
+        return query
+
+    try:
+        import google.generativeai as genai
+
+        genai.configure(api_key=settings.gemini_api_key)
+        model = genai.GenerativeModel(settings.gemini_rewriter_model)
+        prompt = (
+            "Translate the following user query into natural English.\n"
+            "Keep the meaning exact.\n"
+            "Return only the translated English text, with no explanation.\n\n"
+            f"Query: {query}"
+        )
+        resp = model.generate_content(prompt)
+        text = (getattr(resp, "text", "") or "").strip()
+        if text:
+            return text
+    except Exception:
+        pass
+    return query
+
+
+def _sarvam_greeting_decision(english_query: str) -> Optional[str]:
+    english_query = (english_query or "").strip()
+    if not english_query or not settings.sarvam_api_key:
+        return None
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You classify whether a user message is ONLY a simple greeting or basic social opener.\n"
+                "Think step by step if needed, but end with a final line exactly like RESULT=GREETING or RESULT=BIKE.\n"
+                "Return GREETING only when the message is just a greeting/opening such as "
+                "'hi', 'hello', 'good morning', 'namaste', 'thanks', 'who are you', or 'help'.\n"
+                "If the message contains any bike issue, symptom, manual/specification request, "
+                "question, image-related request, or any meaningful content beyond a simple greeting, "
+                "return BIKE."
+            ),
+        },
+        {"role": "user", "content": english_query},
+    ]
+
+    try:
+        from sarvamai import SarvamAI
+
+        client = SarvamAI(api_subscription_key=settings.sarvam_api_key)
+        response = client.chat.completions(
+            model=settings.sarvam_model,
+            messages=messages,
+            temperature=0,
+            top_p=1,
+            max_tokens=256,
+        )
+        msg = response.choices[0].message
+        raw = (
+            getattr(msg, "content", None)
+            or getattr(msg, "reasoning_content", None)
+            or ""
+        ).strip().upper()
+        if "RESULT=GREETING" in raw:
+            return "greeting"
+        if "RESULT=BIKE" in raw:
+            return "bike"
+        if "GREETING" in raw:
+            return "greeting"
+        if "BIKE" in raw:
+            return "bike"
+    except Exception:
+        pass
+    return None
+
+
+def _classify_query_category(query: str, image_b64: Optional[str]) -> str:
+    heuristic = _heuristic_query_category(query, image_b64)
+    if image_b64:
+        return heuristic
+
+    english_query = _translate_query_to_english(query)
+    llm_decision = _sarvam_greeting_decision(english_query)
+    english_heuristic = _heuristic_query_category(english_query, None)
+    if llm_decision == "greeting" and english_heuristic != "greeting":
+        return "bike"
+    return llm_decision or heuristic
 
 
 def _general_chat_answer(query: str) -> GroundedAnswer:
     lang = _detect_query_language(query)
     if lang == "hi":
         text = (
-            "नमस्ते। मैं रॉयल एनफील्ड बाइक असिस्टेंट हूं। आप अपनी बाइक में आ रही किसी भी "
-            "समस्या के बारे में पूछ सकते हैं, या बाइक की मुख्य तकनीकी specifications जान सकते हैं."
+            "नमस्ते, मैं Royal Enfield bike assistant हूं। आप अपनी बाइक में आ रही किसी भी "
+            "समस्या के बारे में पूछ सकते हैं, या बाइक की मुख्य technical specifications जान सकते हैं।"
         )
     elif lang == "ta":
         text = (
-            "வணக்கம். நான் ராயல் என்ஃபீல்ட் பைக் உதவியாளர். உங்கள் பைக்கில் இருக்கும் "
-            "எந்த பிரச்சனையையும் கேட்கலாம், அல்லது பைக்கின் முக்கிய தொழில்நுட்ப விவரங்களையும் கேட்கலாம்."
+            "வணக்கம், நான் Royal Enfield bike assistant. உங்கள் பைக்கில் இருக்கும் "
+            "எந்த பிரச்சனையையும் கேட்கலாம், அல்லது பைக்கின் முக்கிய technical specifications-ஐ கேட்கலாம்."
         )
     else:
         text = (
@@ -156,13 +262,70 @@ def _general_chat_answer(query: str) -> GroundedAnswer:
     )
 
 
+def _localized_manual_refusal(language: str) -> str:
+    if language == "hi":
+        return (
+            "मैनुअल में इस समस्या के बारे में पर्याप्त और स्पष्ट जानकारी उपलब्ध नहीं है। "
+            "कृपया अधिकृत सर्विस सेंटर से संपर्क करें या अपने नजदीकी सर्विस सेंटर पर जाएं।"
+        )
+    if language == "ta":
+        return (
+            "இந்த பிரச்சனை குறித்து கையேட்டில் போதுமான தெளிவான தகவல் இல்லை. "
+            "அதிகாரப்பூர்வ சேவை மையத்தை தொடர்புகொள்ளவும் அல்லது அருகிலுள்ள சேவை மையத்திற்குச் செல்லவும்."
+        )
+    return (
+        "The manual does not contain enough clear information about this issue. "
+        "Please contact an authorized service center or visit the nearest service centre."
+    )
+
+
+def _is_generic_image_diagnosis_query(query: str, image_b64: Optional[str]) -> bool:
+    if not image_b64:
+        return False
+    q = _normalize_query(query)
+    patterns = [
+        r"\bimage\b",
+        r"\bphoto\b",
+        r"\bpicture\b",
+        r"\bthis image\b",
+        r"\bthis photo\b",
+        r"\bwhat issue\b",
+        r"\bidentify\b",
+        r"\bvisible\b",
+        r"क्या समस्या",
+        r"फोटो",
+        r"तस्वीर",
+    ]
+    return any(re.search(pattern, q) for pattern in patterns)
+
+
+def _image_issue_supported_by_chunks(vision_text: str, retrieved) -> bool:
+    vt = (vision_text or "").lower()
+    if "leak" in vt:
+        keywords = ("leak", "leaking", "drip", "seep", "oil seal", "gasket")
+    elif "smoke" in vt:
+        keywords = ("smoke", "smoking", "fume", "exhaust")
+    elif "damage" in vt or "wear" in vt:
+        keywords = ("damage", "wear", "crack", "replace", "inspect")
+    else:
+        keywords = ()
+    if not keywords:
+        return True
+    for rc in retrieved:
+        text = rc.chunk.text.lower()
+        if any(k in text for k in keywords):
+            return True
+    return False
+
+
 def _run_pipeline(query: str, image_b64: Optional[str],
                   manual_id: Optional[str],
                   session_id: Optional[str] = None) -> QueryResponse:
     overall_t0 = time.time()
     error_str: Optional[str] = None
 
-    if _is_greeting_or_general_chat(query, image_b64):
+    query_category = _classify_query_category(query, image_b64)
+    if query_category == "greeting":
         answer = _general_chat_answer(query)
         total_ms = _ms_since(overall_t0)
         if session_id:
@@ -238,6 +401,18 @@ def _run_pipeline(query: str, image_b64: Optional[str],
     t0 = time.time()
     answer = verify(raw_answer, retrieved)
     answer.answer = sanitize_answer_text(answer.answer)
+    if (
+        answer.manual_supported
+        and _is_generic_image_diagnosis_query(query, image_b64)
+        and not _image_issue_supported_by_chunks(vision_text, retrieved)
+    ):
+        answer = GroundedAnswer(
+            answer=_localized_manual_refusal(answer.language or _detect_query_language(query)),
+            citations=[],
+            confidence="low",
+            manual_supported=False,
+            language=answer.language or _detect_query_language(query),
+        )
     verify_ms = _ms_since(t0)
 
     total_ms = _ms_since(overall_t0)

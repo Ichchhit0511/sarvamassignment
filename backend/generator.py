@@ -26,6 +26,10 @@ source is the manual chunks the user provides. Follow these rules absolutely:
 2. If the answer is not in the chunks, set "manual_supported": false and reply
    with a short refusal explaining the manual does not cover this and the user
    should consult an authorized service center.
+2a. Visual observations from the photo are only for retrieval assistance. Do
+   not present image-based diagnosis, fault identification, or repair advice as
+   supported unless the provided manual chunks explicitly support that exact
+   issue.
 3. Every factual claim in your answer must be traceable to one of the chunks.
    Cite chunks via the "citations" field with the page number and chunk_id.
    Never mention chunk IDs, internal IDs, or raw citation objects in the
@@ -163,6 +167,7 @@ def sanitize_answer_text(text: str) -> str:
     cleaned = (text or "").strip()
     cleaned = re.sub(r"\bchunk_id\s*[:=]\s*[A-Za-z0-9_-]+\b", "", cleaned, flags=re.I)
     cleaned = re.sub(r"\b[A-Fa-f0-9]{16,}\b", "", cleaned)
+    cleaned = re.sub(r"(?:\[\s*\d+\s*,?\s*\]\s*,?\s*){1,}", "", cleaned)
     cleaned = re.sub(r"\(\s*,?\s*\)", "", cleaned)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
