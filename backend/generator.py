@@ -73,6 +73,38 @@ def _detect_query_language(query: str) -> tuple[str, str]:
     return "en", "English"
 
 
+def _detect_text_language(text: str) -> str:
+    for ch in text or "":
+        cp = ord(ch)
+        if 0x0900 <= cp <= 0x097F:
+            return "hi"
+        if 0x0B80 <= cp <= 0x0BFF:
+            return "ta"
+        if 0x0980 <= cp <= 0x09FF:
+            return "bn"
+        if 0x0C00 <= cp <= 0x0C7F:
+            return "te"
+        if 0x0C80 <= cp <= 0x0CFF:
+            return "kn"
+        if 0x0A80 <= cp <= 0x0AFF:
+            return "gu"
+        if 0x0A00 <= cp <= 0x0A7F:
+            return "pa"
+        if 0x0D00 <= cp <= 0x0D7F:
+            return "ml"
+        if 0x0B00 <= cp <= 0x0B7F:
+            return "or"
+    return "en"
+
+
+def _answer_matches_language(answer_text: str, returned_language: str | None,
+                             target_language_code: str) -> bool:
+    if (returned_language or "").lower() == target_language_code.lower():
+        return True
+    detected = _detect_text_language(answer_text)
+    return detected == target_language_code.lower()
+
+
 def _format_chunks(chunks: list[RetrievedChunk]) -> str:
     lines: list[str] = []
     for rc in chunks:
@@ -135,6 +167,43 @@ def sanitize_answer_text(text: str) -> str:
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
+
+
+def _rewrite_answer_in_target_language(answer_text: str,
+                                       target_language_code: str,
+                                       target_language_name: str) -> str:
+    if not answer_text or not settings.sarvam_api_key:
+        return answer_text
+    try:
+        from sarvamai import SarvamAI
+        client = SarvamAI(api_subscription_key=settings.sarvam_api_key)
+        response = client.chat.completions(
+            model=settings.sarvam_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Rewrite the assistant answer in the requested target language only. "
+                        "Preserve meaning exactly. Do not add or remove facts. "
+                        "Do not mention chunk IDs, citations, or internal metadata."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Target language: {target_language_name} ({target_language_code})\n\n"
+                        f"Answer to rewrite:\n{answer_text}"
+                    ),
+                },
+            ],
+            temperature=0.0,
+            top_p=1,
+            max_tokens=1200,
+        )
+        rewritten = response.choices[0].message.content or answer_text
+        return sanitize_answer_text(rewritten)
+    except Exception:
+        return answer_text
 
 
 def _refusal(reason: str, language: str = "en") -> GroundedAnswer:
@@ -231,10 +300,24 @@ def generate(query: str, vision: VisionObservation | None,
         for c in parsed.get("citations", [])
         if isinstance(c, dict)
     ]
+    answer_text = sanitize_answer_text(parsed.get("answer") or raw or "")
+    returned_language = parsed.get("language")
+    if not _answer_matches_language(
+        answer_text,
+        returned_language,
+        target_language_code,
+    ):
+        answer_text = _rewrite_answer_in_target_language(
+            answer_text,
+            target_language_code,
+            target_language_name,
+        )
+        returned_language = target_language_code
+
     return GroundedAnswer(
-        answer=sanitize_answer_text(parsed.get("answer") or raw or ""),
+        answer=answer_text,
         citations=citations,
         confidence=parsed.get("confidence", "low"),
         manual_supported=bool(parsed.get("manual_supported", False)),
-        language=parsed.get("language") or target_language_code,
+        language=returned_language or target_language_code,
     ), usage
